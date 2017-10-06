@@ -1,0 +1,326 @@
+#include <windows.h>
+#include <stdio.h>
+#include <iostream>
+#include  <fstream>
+#include <bitset>
+#include <vector>
+#include <cmath>
+
+using namespace std;
+
+
+char *ver="1.0";
+char *title="Fast Disk Dump For Windows";
+char *author="[Sergei Korneev, 2017]";
+
+
+
+void disklist() {
+    cout << "Logical Drives (wmic volume list brief): "<<endl<<endl<<endl<<endl;
+    system ("wmic volume list brief");cout << endl<< endl<< endl<< endl;
+    cout<<"----------------------------------------------------------------------------"<<endl<<endl;
+    cout << "Physical Drives(wmic diskdrive list brief): "<<endl<<endl<<endl<<endl;
+    system ("wmic diskdrive list brief");
+    }
+
+
+
+void help() {
+
+    HANDLE  hConsole;
+    int k;
+    COORD a;
+    a.X = 1000;
+    a.Y = 500;
+    RECT r;
+    hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+    HWND console = GetConsoleWindow();
+    //for( k = 1; k < 100; k++)
+    // {
+    SetConsoleTextAttribute(hConsole, 3);
+
+    // }
+
+
+        GetWindowRect(console, &r); //stores the console's current dimensions
+        SetConsoleScreenBufferSize(hConsole, a);
+        MoveWindow(console, r.left, r.top, 1000, 500, TRUE); // 800 width, 100 height
+
+cout<<endl<<endl<<"Use:"<<endl<<endl
+<<"program.exe <command> <disk> <firstblock> <blockscount> <in/out file> <flag>"<<endl<<endl
+<<"----------------------------------------------------------------------------"<<endl<<endl
+<<"This program requres administration privileges.                             "<<endl<<endl
+<<"----------------------------------------------------------------------------"<<endl<<endl
+<<"Example:"<<endl<<endl
+<<"----------------------------------------------------------------------------"<<endl<<endl
+<<"To read first 1024 blocks from disk m: to file  ./sectors.bin"<<endl<<endl
+<<"----------------------------------------------------------------------------"<<endl<<endl
+<<"program.exe r \"\\\\.\\m:\" 0 1024 ./sectors.bin"<<endl<<endl
+
+<<"program.exe r \"\\\\.\\PhysicalDrive1\" 0 1024 ./sectors.bin"<<endl<<endl
+<<"----------------------------------------------------------------------------"<<endl<<endl
+<<"To write to disk m: at offset 0 from file  ./sectors.bin"<<endl<<endl
+<<"----------------------------------------------------------------------------"<<endl<<endl
+<<"program.exe w \"\\\\.\\m:\" 0  ./sectors.bin"<<endl<<endl
+
+<<"program.exe w \"\\\\.\\PhysicalDrive1\" 0  ./sectors.bin"<<endl<<endl
+<<"----------------------------------------------------------------------------"<<endl<<endl
+<<"With \"force\" flag:"<<endl<<endl
+<<"----------------------------------------------------------------------------"<<endl<<endl
+<<"program.exe w \"\\\\.\\PhysicalDrive1\" 0  ./sectors.bin f "<<endl<<endl
+<<"----------------------------------------------------------------------------"<<endl<<endl
+<<"Default block size is 512 bytes.                                            "<<endl<<endl
+<<"----------------------------------------------------------------------------"<<endl<<endl
+;
+disklist();
+cout<<"----------------------------------------------------------------------------"<<endl<<endl;
+    }
+
+
+
+
+
+//Reads bytes from disk
+short ReadDisk
+       (const char *_dsk,    // disk to access
+       char *&_buff,         // buffer where bytes will be stored
+       __int64 _nsect,   // byte number, starting with 0
+       int buffer
+
+       )
+{
+    DWORD dwRead;
+    LARGE_INTEGER li;
+    li.QuadPart = _nsect;
+    HANDLE hDisk=CreateFile(_dsk,GENERIC_READ,FILE_SHARE_VALID_FLAGS,0,OPEN_EXISTING,0,0);
+
+    if(hDisk==INVALID_HANDLE_VALUE)
+        {
+            cout << "Disk access error." <<endl;
+            CloseHandle(hDisk);
+
+            return 1;
+        }
+
+    SetFilePointer(hDisk, li.LowPart, &li.HighPart,FILE_BEGIN);
+    if (ReadFile(hDisk,_buff, buffer,&dwRead,0)==false) {cout << "Disk read error (probably  end-of-file)." <<endl;CloseHandle(hDisk);return 1;}  // read
+    CloseHandle(hDisk);
+return 0;
+}
+
+
+
+//Reads bytes from disk to a file.
+short readtofile(
+                 __int64 _startsect,
+                 __int64 _counsect,
+                  const char *_disk,
+                  const char *_file
+                 )
+    {
+
+    __int64 _maxbuffer=20000,_maxsectors;
+    ofstream OutFile;
+    OutFile.open(_file, ios::out|ios::binary);
+    if (OutFile.fail()) {cout<<"File open error."<<endl;return 1;}
+    int  buffer=512;
+    char *buff2=new  char[_maxbuffer*buffer];
+    _maxsectors=_maxbuffer;
+
+
+
+    cout<<"Writing " <<_counsect*buffer<<" bytes to file "<<_file<<" from disk "<<_disk<<endl<<endl<<endl;
+while ( _counsect )
+{
+
+    if (_counsect>1) {_maxsectors=_counsect-1;} else {_maxsectors=1;}
+    if (_maxsectors>_maxbuffer){_maxsectors=_maxbuffer;}
+    if(ReadDisk(_disk,buff2,_startsect*buffer,_maxsectors*buffer)) {delete[] buff2;    OutFile.close();return 1;}
+    cout << "Writing  blocks " <<  _startsect << " - " <<_startsect+_maxsectors<<" of "<<_disk<< " Remain:" <<_counsect<<endl;
+    if(OutFile.write (buff2,_maxsectors*buffer).fail()){cout<<"File write error."<<endl;delete[] buff2;    OutFile.close();return 1;}
+    _counsect = _counsect -_maxsectors;_startsect=_startsect+_maxsectors;
+
+}
+
+
+    delete[] buff2;
+    OutFile.close();
+    cout << "Done. " <<endl;
+return 0;
+    }
+
+
+
+
+__int64 getFileSize(const std::string &fileName)
+{
+    ifstream file(fileName.c_str(), ifstream::in | ifstream::binary);
+
+    if(!file.is_open())
+    {
+        return -1;
+    }
+
+    file.seekg(0, ios::end);
+    int fileSize = file.tellg();
+    file.close();
+
+    return fileSize;
+}
+
+
+
+
+//Writes bytes from file to disk.
+short WriteDisk( __int64 _nsect,
+                 //__int64 _counsect,
+                  const char *_disk,
+                  const char *_file){
+
+    __int64 _maxbuffer= 20000, _startsect =0,bytestowrite, _counsect;
+    int  buffer=512;
+    char *buff2=new  char[_maxbuffer*buffer];
+    __int64  _maxsectors=_maxbuffer;
+
+    HANDLE hDisk=CreateFile(_disk,GENERIC_READ|FILE_SHARE_DELETE|FILE_SHARE_WRITE,FILE_SHARE_VALID_FLAGS,0,OPEN_EXISTING,FILE_FLAG_WRITE_THROUGH,0);
+
+        if(hDisk==INVALID_HANDLE_VALUE)
+        {
+            cout << "Disk access error." <<endl;
+            CloseHandle(hDisk);
+            return 1;
+        }
+
+            DWORD dwRead;
+            LARGE_INTEGER li;
+            li.QuadPart = _nsect*buffer;
+            SetFilePointer(hDisk, li.LowPart, &li.HighPart,FILE_BEGIN);
+
+
+
+
+    _counsect=getFileSize(_file);
+    if (_counsect==-1 || _counsect==0){cout<<"Cannot access input file or zero file size."<< endl;return 1;}
+    _counsect/=buffer;
+
+
+    cout<<"Writing " <<_counsect*buffer<<" bytes to disk "<<_disk<<endl<<endl<<endl;
+while ( _counsect )
+{
+
+    if (_counsect>1) {_maxsectors=_counsect-1;} else {_maxsectors=1;}
+    if (_maxsectors>_maxbuffer){_maxsectors=_maxbuffer;}
+    if(ReadDisk(_file,buff2,_startsect*buffer,_maxsectors*buffer)) {return 1;}
+
+
+    bytestowrite=_maxsectors*buffer;
+    DWORD dwBytesWritten = 0;
+    cout<<"Blocks " <<_startsect <<"-"<<_startsect+_maxsectors<<" | ";
+
+     WriteFile(
+                    hDisk,           // open file handle
+                    *&buff2,      // start of data to write
+                    *&bytestowrite,  // number of bytes to write
+                    &dwBytesWritten, // number of bytes that were written
+                    NULL);            // no overlapped structure
+
+    if (dwBytesWritten != bytestowrite)
+        {
+            // This is an error because a synchronous write that results in
+            // success (WriteFile returns TRUE) should write all data as
+            // requested. This would not necessarily be the case for
+            // asynchronous writes.
+            cout <<"Error: cannot write to disk! Try to unmount it first."<<endl;
+            CloseHandle(hDisk);
+            delete[] buff2;
+            return 1;
+        }
+        else
+        {
+        FlushFileBuffers(  hDisk);
+
+        cout <<"Successfull. Remaining "<< _counsect<<" blocks."<<endl;
+        }
+        _counsect = _counsect -_maxsectors;_startsect+=_maxsectors;
+}
+
+
+        delete[] buff2;
+        CloseHandle(hDisk);
+        cout <<"Done."<<endl;
+
+return 0;
+}
+
+
+
+__int64 toint64(const char *str){
+
+__int64 len=strlen(str),_count=0;
+char c2[len];int c=0;
+strcpy(c2, str);
+
+if  ((int)c2[c]<48||(int)c2[c]>57||len > 11) {return -1;}else {
+
+//Convert char array to big number
+
+        while (len){
+        _count+=((__int64)powf(10,len-1))*(((int)c2[c])-48) ;
+        len--;c++;}
+}
+
+return _count;
+
+}
+
+
+
+
+
+int main(
+         int argc,      // Number of strings in array argv
+          char *argv[],   // Array of command-line argument strings
+          char *envp[]   // Array of environment variable strings
+
+         )
+{
+SetConsoleTitle(title);
+cout<<title<<" ver " << ver <<" "<< author << endl<<endl;
+
+if (argc==1) {help();getchar(); return 1;}
+
+//Executing
+if (argv[1]==(string)"r"&&argc==6) {
+    //Check if the parameter 3 is number.
+    __int64 _startblock=toint64(argv[3]),_blockcount=toint64(argv[4]);
+    if  (_startblock==-1) {cout<<"Parameter 3 must be a number, with  maximum 11 digits.";getchar();return 1;}
+    //Check if the parameter 4 is number.
+    if  (_blockcount==-1) {cout<<"Parameter 4 must be a number, with  maximum 11 digits.";getchar();return 1;}
+    readtofile(_startblock, _blockcount,argv[2],argv[5]);
+}
+
+
+else if (argv[1]==(string)"w"&&argc>=5&&argc<=6) {
+        //Check if the parameter 3 is number.
+    __int64 _startblock=toint64(argv[3]),_blockcount=toint64(argv[4]);
+    if  (_startblock==-1) {cout<<"Parameter 3 must be a number, with  maximum 11 digits.";getchar();return 1;}
+
+
+switch (argc){
+case 6:
+        if ((string)argv[5]=="f"){WriteDisk( _startblock, argv[2], argv[4]);}
+
+case 5:
+
+        string answer;
+        cout << "Be carefull! Enter 'yes' to write file " << argv[4] << " to " << argv[2]<<" :";
+        cin>>answer;
+if (answer=="yes"){WriteDisk( _startblock, argv[2], argv[4]);} else {return 1;}
+}
+
+}
+
+else {cout<<"Syntax error. Incorrect first parameter or parameters count mismatch."<<endl;getchar();return 1; }
+
+return 0;
+}
