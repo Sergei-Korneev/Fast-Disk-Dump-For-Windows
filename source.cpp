@@ -323,4 +323,5 @@ if (answer=="yes"){WriteDisk( _startblock, argv[2], argv[4]);} else {return 1;}
 else {cout<<"Syntax error. Incorrect first parameter or parameters count mismatch."<<endl;getchar();return 1; }
 
 return 0;
+
 }
